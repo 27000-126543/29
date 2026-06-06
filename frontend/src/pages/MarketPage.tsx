@@ -129,25 +129,10 @@ interface InventoryItem {
   quantity: number;
 }
 
-function filterInventory(inventory: Record<string, number | undefined>): InventoryItem[] {
-  const items: InventoryItem[] = [];
-  for (const [k, rawV] of Object.entries(inventory || {})) {
-    const v = Number(rawV) || 0;
-    if (!v || v <= 0) continue;
-    if (k.startsWith('fish_')) {
-      const id = k.slice(5);
-      items.push({ key: k, itemType: 'fish', itemId: id, itemName: id, quantity: v });
-    } else if (k.startsWith('dish_')) {
-      const id = k.slice(5);
-      items.push({ key: k, itemType: 'dish', itemId: id, itemName: id, quantity: v });
-    } else if (k.startsWith('bait_')) {
-      const id = k.slice(5);
-      items.push({ key: k, itemType: 'bait', itemId: id, itemName: id, quantity: v });
-    } else if (['wood', 'iron', 'stone', 'silver', 'gold_ore', 'crystal', 'mythril', 'dragon_scale', 'ancient_rune'].includes(k)) {
-      items.push({ key: k, itemType: 'material', itemId: k, itemName: k, quantity: v });
-    }
-  }
-  return items;
+interface InventoryData {
+  fishes: Array<{ fishId: string; name: string; quantity: number }>;
+  dishes: Array<{ dishId: string; name: string; quantity: number }>;
+  materials: Array<{ materialId: string; quantity: number }>;
 }
 
 export default function MarketPage() {
@@ -171,10 +156,48 @@ export default function MarketPage() {
 
   const [buyQuantity, setBuyQuantity] = useState<string>('1');
 
-  const inventory = useMemo(() => {
-    if (!player) return [] as InventoryItem[];
-    return filterInventory(player.inventory || {});
-  }, [player]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+
+  const refreshInventory = () => {
+    if (!player?.id) return;
+    client.get<InventoryData>(`/player/${player.id}/inventory`).then((data) => {
+      const items: InventoryItem[] = [];
+      (data.fishes || []).forEach((f) =>
+        items.push({
+          key: `fish_${f.fishId}`,
+          itemType: 'fish',
+          itemId: f.fishId,
+          itemName: f.name,
+          quantity: f.quantity,
+        })
+      );
+      (data.dishes || []).forEach((d) =>
+        items.push({
+          key: `dish_${d.dishId}`,
+          itemType: 'dish',
+          itemId: d.dishId,
+          itemName: d.name,
+          quantity: d.quantity,
+        })
+      );
+      (data.materials || []).forEach((m) => {
+        let t: ItemType = 'material';
+        if (m.materialId.startsWith('bait_')) t = 'bait';
+        items.push({
+          key: m.materialId,
+          itemType: t,
+          itemId: m.materialId,
+          itemName: m.materialId,
+          quantity: m.quantity,
+        });
+      });
+      setInventory(items.filter((it) => it.quantity > 0));
+    }).catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshInventory();
+  }, [player?.id]);
 
   const filteredInventory = useMemo(() => {
     return inventory.filter((it) => it.itemType === listItemType);
@@ -293,6 +316,7 @@ export default function MarketPage() {
       setMessage({ type: 'success', text: '上架成功！' });
       setShowListModal(false);
       fetchListings();
+      refreshInventory();
     } catch (e: any) {
       setMessage({ type: 'error', text: e.message || '上架失败' });
     }

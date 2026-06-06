@@ -12,7 +12,7 @@ interface LeaderboardEntry {
 }
 
 interface LeaderboardResponse {
-  leaderboard: LeaderboardEntry[];
+  entries: LeaderboardEntry[];
   myRank?: number;
 }
 
@@ -62,7 +62,7 @@ export default function LeaderboardPage() {
         params: { type: activeType, playerId: player.id, limit: 100 },
       })
       .then((data) => {
-        setEntries(data.leaderboard || []);
+        setEntries(data.entries || []);
         setMyRank(data.myRank);
       })
       .catch(() => {})

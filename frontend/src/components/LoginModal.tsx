@@ -24,18 +24,9 @@ export default function LoginModal({ open }: Props) {
       localStorage.setItem('fishing_token', token);
       setPlayer(player);
       ws.connect(player.id);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login failed:', error);
-      const mockPlayer = {
-        id: 'local-' + Date.now(),
-        nickname: nickname.trim(),
-        level: 1,
-        exp: 0,
-        gold: 1000,
-        currentWaterAreaId: 'default',
-      };
-      setPlayer(mockPlayer);
-      ws.connect(mockPlayer.id);
+      alert(error.message || '登录失败，请重试');
     } finally {
       setLoading(false);
     }

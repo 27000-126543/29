@@ -43,6 +43,12 @@ interface RecipeApproval {
   approvalStatus: ApprovalStatus;
 }
 
+interface InventoryData {
+  fishes: Array<{ fishId: string; name: string; quantity: number }>;
+  dishes: Array<{ dishId: string; name: string; quantity: number }>;
+  materials: Array<{ materialId: string; quantity: number }>;
+}
+
 type MainTab = 'members' | 'approval' | 'pond';
 type ApprovalTab = 'recipe' | 'building' | 'fish';
 
@@ -148,6 +154,7 @@ export default function GuildPage() {
   const player = useGameStore((s) => s.player);
   const [guild, setGuild] = useState<Guild | null>(null);
   const [members, setMembers] = useState<GuildMember[]>([]);
+  const [inventory, setInventory] = useState<InventoryData | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [mainTab, setMainTab] = useState<MainTab>('members');
   const [approvalTab, setApprovalTab] = useState<ApprovalTab>('recipe');
@@ -155,6 +162,23 @@ export default function GuildPage() {
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [createName, setCreateName] = useState('');
   const [joinId, setJoinId] = useState('');
+
+  const refreshInventory = () => {
+    if (!player?.id) return;
+    client.get<InventoryData>(`/player/${player.id}/inventory`).then((data) => {
+      setInventory(data);
+    }).catch(() => {});
+  };
+
+  const getOwnedMaterial = (materialId: string): number => {
+    if (!inventory) return 0;
+    const found = inventory.materials.find((m) => m.materialId === materialId);
+    return found?.quantity || 0;
+  };
+
+  useEffect(() => {
+    refreshInventory();
+  }, [player?.id]);
 
   useEffect(() => {
     if (!message) return;
@@ -175,13 +199,13 @@ export default function GuildPage() {
     try {
       const data = await client.get<Guild>(`/guild/${guildId}`);
       setGuild(data);
-      mockLoadMembers(data);
+      loadMembers(data);
     } catch (e: any) {
       setMessage({ type: 'error', text: e.message || '加载公会信息失败' });
     }
   }
 
-  function mockLoadMembers(g: Guild) {
+  function loadMembers(g: Guild) {
     const list: GuildMember[] = g.members.map((mid) => {
       const isLeader = mid === g.leaderId;
       const isAdmin = g.admins.includes(mid);
@@ -190,9 +214,9 @@ export default function GuildPage() {
       else if (isAdmin) role = GuildRole.ADMIN;
       return {
         id: mid,
-        nickname: mid === g.leaderId ? '公会会长' : `渔夫${mid.slice(0, 4)}`,
+        nickname: mid.slice(0, 8),
         role,
-        totalWeightCaught: Math.floor(Math.random() * 5000) + 100,
+        totalWeightCaught: 0,
       };
     });
     setMembers(list.sort((a, b) => getRoleRank(b.role) - getRoleRank(a.role)));
@@ -315,13 +339,7 @@ export default function GuildPage() {
     }
   }
 
-  const mockRecipes: RecipeApproval[] = useMemo(
-    () => [
-      { id: 'r1', baitId: 'magic_bait', name: '魔法鱼饵配方', fragmentsRequired: 20, fragmentsCollected: 15, submittedBy: '渔夫A', approvalStatus: ApprovalStatus.PENDING },
-      { id: 'r2', baitId: 'ancient_lure', name: '远古诱饵配方', fragmentsRequired: 50, fragmentsCollected: 30, submittedBy: '渔夫B', approvalStatus: ApprovalStatus.PENDING },
-    ],
-    []
-  );
+  const pendingRecipes: RecipeApproval[] = useMemo(() => [], []);
 
   const pendingBuildings = guild?.buildingQueue.filter((b) => b.approvalStatus === ApprovalStatus.PENDING) || [];
   const pendingFish = guild?.fishStock.filter((f) => f.approvalStatus === ApprovalStatus.PENDING) || [];
@@ -631,14 +649,14 @@ export default function GuildPage() {
 
             {approvalTab === 'recipe' && (
               <div>
-                {mockRecipes.length === 0 ? (
+                {pendingRecipes.length === 0 ? (
                   <div className="text-center text-gray-400 py-16">
                     <div className="text-6xl mb-3">🪱</div>
                     暂无限时审批的鱼饵配方
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    {mockRecipes.map((r, i) => (
+                    {pendingRecipes.map((r, i) => (
                       <div
                         key={r.id}
                         className="flex items-center justify-between bg-primary/40 rounded-xl px-4 py-3 border border-white/10"
@@ -810,7 +828,7 @@ export default function GuildPage() {
                           </span>
                         </div>
                         {Object.entries(nextPondCost.materials).map(([k, v]) => {
-                          const owned = (player?.materials || {})[k] || 0;
+                          const owned = getOwnedMaterial(k);
                           return (
                             <div key={k} className="flex justify-between text-sm">
                               <span className="text-gray-400">📦 {MATERIAL_LABEL[k] || k}</span>

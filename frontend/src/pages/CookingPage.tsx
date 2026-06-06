@@ -19,6 +19,12 @@ interface InventoryDish {
   buffs: Array<{ stat: string; value: number; duration: number }>;
 }
 
+interface InventoryData {
+  fishes: Array<{ fishId: string; name: string; quantity: number }>;
+  dishes: Array<{ dishId: string; name: string; quantity: number }>;
+  materials: Array<{ materialId: string; quantity: number }>;
+}
+
 const FISH_NAMES: Record<string, string> = {
   common_carp: '普通鲤鱼',
   grass_carp: '草鱼',
@@ -95,12 +101,46 @@ function getExpForLevel(level: number): number {
 
 export default function CookingPage() {
   const player = useGameStore((s) => s.player);
+  const setPlayer = useGameStore((s) => s.setPlayer);
   const [recipes, setRecipes] = useState<Dish[]>([]);
   const [selectedDish, setSelectedDish] = useState<Dish | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [myDishesTab, setMyDishesTab] = useState(false);
   const [myDishes, setMyDishes] = useState<InventoryDish[]>([]);
+  const [inventory, setInventory] = useState<InventoryData | null>(null);
+
+  const refreshInventory = () => {
+    if (!player?.id) return;
+    client.get<InventoryData>(`/player/${player.id}/inventory`).then((data) => {
+      setInventory(data);
+      const dishes: InventoryDish[] = (data.dishes || []).map((d) => {
+        const found = recipes.find((r) => r.id === d.dishId);
+        return {
+          id: d.dishId,
+          name: found?.name || d.name,
+          quantity: d.quantity,
+          buffs: found?.buffs || [],
+        };
+      });
+      setMyDishes(dishes);
+    }).catch(() => {});
+  };
+
+  const refreshPlayerBasic = () => {
+    if (!player?.id) return;
+    client.get<any>(`/player/${player.id}`).then((p) => {
+      setPlayer({
+        id: p.id,
+        nickname: p.nickname,
+        level: p.level,
+        exp: p.exp,
+        gold: p.gold,
+        cookingLevel: p.cookingLevel,
+        cookingExp: p.cookingExp,
+      });
+    }).catch(() => {});
+  };
 
   useEffect(() => {
     fetchRecipes();
@@ -113,24 +153,8 @@ export default function CookingPage() {
   }, [recipes]);
 
   useEffect(() => {
-    if (!player) return;
-    const dishes: InventoryDish[] = [];
-    const inv = player.inventory || {};
-    for (const [k, rawV] of Object.entries(inv)) {
-      const v = Number(rawV) || 0;
-      if (k.startsWith('dish_') && v > 0) {
-        const id = k.slice(5);
-        const found = recipes.find((r) => r.id === id);
-        dishes.push({
-          id,
-          name: found?.name || id,
-          quantity: v,
-          buffs: found?.buffs || [],
-        });
-      }
-    }
-    setMyDishes(dishes);
-  }, [player, recipes]);
+    refreshInventory();
+  }, [player?.id, recipes]);
 
   useEffect(() => {
     if (!message) return;
@@ -155,15 +179,12 @@ export default function CookingPage() {
 
   const fishInventory = useMemo(() => {
     const inv: Record<string, number> = {};
-    if (!player) return inv;
-    const rawInv = player.inventory || {};
-    for (const [k, rawV] of Object.entries(rawInv)) {
-      if (k.startsWith('fish_')) {
-        inv[k.slice(5)] = Number(rawV) || 0;
-      }
-    }
+    if (!inventory) return inv;
+    (inventory.fishes || []).forEach((f) => {
+      inv[f.fishId] = f.quantity;
+    });
     return inv;
-  }, [player]);
+  }, [inventory]);
 
   const cookingLevel = player?.cookingLevel || 1;
   const cookingExp = player?.cookingExp || 0;
@@ -199,14 +220,8 @@ export default function CookingPage() {
       });
       setMessage({ type: 'success', text: `烹饪成功！获得 ${dish.name}，经验 +${(res as any).expGained || 0}` });
       fetchRecipes();
-      if (player.inventory) {
-        player.inventory[`dish_${dish.id}`] = (player.inventory[`dish_${dish.id}`] || 0) + 1;
-        for (const req of dish.requiredFish) {
-          const k = `fish_${req.fishId}`;
-          if (player.inventory[k]) player.inventory[k] -= req.quantity;
-        }
-      }
-      useGameStore.setState({ player: { ...player } });
+      refreshInventory();
+      refreshPlayerBasic();
     } catch (e: any) {
       setMessage({ type: 'error', text: e.message || '烹饪失败' });
     }
@@ -214,13 +229,12 @@ export default function CookingPage() {
 
   function handleUseDish(dish: InventoryDish) {
     if (!player) return;
-    const key = `dish_${dish.id}`;
-    if ((player.inventory?.[key] || 0) <= 0) {
+    const owned = myDishes.find((d) => d.id === dish.id);
+    if (!owned || owned.quantity <= 0) {
       setMessage({ type: 'error', text: '料理数量不足' });
       return;
     }
-    player.inventory![key] -= 1;
-    useGameStore.setState({ player: { ...player } });
+    refreshInventory();
     setMessage({ type: 'success', text: `使用了 ${dish.name}！Buff 生效` });
   }
 
